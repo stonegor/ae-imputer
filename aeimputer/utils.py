@@ -1,6 +1,6 @@
-import torch
 import pandas as pd
 import numpy as np
+import torch
 
 def linear_generator(start, end, n_steps: int, return_int = True):
   if n_steps > 0:
@@ -33,3 +33,6 @@ def format_input(X, missing_values):
   X[X == missing_values] = np.nan  
 
   return X 
+
+def kld_loss(mu, logvar):
+     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())

@@ -1,10 +1,11 @@
-import torch
 import torch.nn as nn
-import warnings
 
 class Encoder(nn.Module):
   def __init__(self, in_features, n_layers, hidden_dims):
     super(Encoder, self).__init__()
+    
+    self.activation = nn.LeakyReLU()
+
     self.encoder_layers = nn.ModuleList()
     for i in range(n_layers):
       if i == 0:
@@ -18,13 +19,16 @@ class Encoder(nn.Module):
   def forward(self, x):
     for layer in self.encoder_layers:
       x = layer(x)
-      x = nn.ReLU()(x)
+      x = self.activation()(x)
     return x
 
 
 class Decoder(nn.Module):
   def __init__(self, in_features, n_layers, hidden_dims):
     super(Decoder, self).__init__()
+
+    self.activation= nn.LeakyReLU()
+
     self.decoder_layers = nn.ModuleList()
     for i in reversed(range(n_layers)):
       if i == 0:
@@ -38,7 +42,7 @@ class Decoder(nn.Module):
   def forward(self, x):
     for layer in self.decoder_layers:
       x = layer(x)
-      x = nn.ReLU()(x)
+      x = self.activation(x)
     return x
 
 

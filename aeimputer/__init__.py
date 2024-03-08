@@ -1,3 +1,4 @@
 from .imputer import (
-    AEImputer
+    AEImputer,
+    VAEImputer
 )
