@@ -1,6 +1,3 @@
-from .ae import AutoEncoder
-from .vae import VariationalAutoEncoder
-from .utils import linear_generator
 import numpy as np
 import warnings
 import torch
@@ -10,12 +7,15 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.impute import SimpleImputer
 import pandas as pd
 
-# TODO: Categorical variables support, early stoping
-# ELBO
-#TODO: AEImputer.transform - Get nan mask for all of the X and pass it along with X to the dataset; 
-        # This will allow for efficient starting imputation 
-        # (mb start not with random, but with median, KNN or PCA imputed values)
-# Scale input and output
+from .ae import AutoEncoder
+from .vae import VariationalAutoEncoder
+from .utils import linear_generator, format_input
+from .early_stopper import EarlyStopper
+
+
+# TODO: Categorical variables support
+# Normalize input and rescale back output
+# allow GPU support
 
 class _BaseImputer:
     def __init__(self, missing_values):
@@ -27,37 +27,19 @@ class _BaseImputer:
     def transform(self, X, verbose = False) -> np.ndarray:
         raise NotImplementedError("Abstract method")
 
-    def fit_transform(self, X) -> np.ndarray:
-        self.fit(X)
-        return self.transform(X)
+    def fit_transform(self, X, verbose=False) -> np.ndarray:
+        self.fit(X,verbose)
+        return self.transform(X,verbose)
     
-    def _format_input(self, X):
-        if isinstance(X, list):
-            X = np.array(X)
-        elif isinstance(X, pd.DataFrame):
-            X = np.array(X.values)
-        if isinstance(X, np.ndarray):
-            X = X.copy()
-        else:
-            raise TypeError("Expected X to be np.ndarray, list or pd.DataFrame.")
-            
-        if len(X.shape) != 2:
-            raise ValueError(f"Expected X to be of shape (batch, features), got {X.shape} instead.")
-        
-        X = X.astype(np.float32)
-        
-        X[X == self.missing_values] = np.nan  
-        
-        return X 
-
-
 class AEImputer(_BaseImputer):
-    def __init__(self, missing_values = np.nan, n_layers = 3, hidden_dims = None, latent_dim_percentage = 'auto',max_epochs = 1000, lr = 1e-3, max_impute_iters = 100, init_nan = 'mean', device = 'cpu', batch_size = 32):
+    def __init__(self, missing_values = np.nan, n_layers = 3, hidden_dims = None, latent_dim_percentage = 'auto',max_epochs = 1000, lr = 1e-3, patience = 10, min_delta = 0.0001, max_impute_iters = 15, init_nan = 'mean', device = 'cpu', batch_size = 32):
         self.n_layers = n_layers
         self.hidden_dims = hidden_dims
         self.latent_dim_percentage = latent_dim_percentage
         self.max_epochs = max_epochs
         self.lr = lr
+        self.patience = patience
+        self.min_delta = min_delta
         self.max_impute_iters = max_impute_iters
         self.init_nan = init_nan
         self.device = device
@@ -71,7 +53,7 @@ class AEImputer(_BaseImputer):
 
     def fit(self, X, verbose = False):
 
-        X = self._format_input(X)
+        X = format_input(X, self.missing_values)
         
         incomplete_rows_mask = np.isnan(X).any(axis=1)
         
@@ -96,7 +78,9 @@ class AEImputer(_BaseImputer):
         self.model = AutoEncoder(self.in_features, self.n_layers, self.hidden_dims).to(self.device)
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)        
         criterion = nn.MSELoss() 
-        
+
+        early_stopper = EarlyStopper(patience=self.patience, min_delta=self.min_delta)
+
         # AutoEncoder training loop
         for epoch in range(self.max_epochs):
             running_loss = 0.0
@@ -111,13 +95,18 @@ class AEImputer(_BaseImputer):
                 optimizer.step()
 
                 running_loss += reconstruction_loss.item()
+
             if verbose:
                 print(f"Epoch {epoch+1}, Loss: {running_loss/len(dataloader)}")
-            self.tolerance = running_loss/len(dataloader)
+ 
+            if early_stopper.early_stop(running_loss/len(dataloader)):  
+                if verbose:
+                    print(f"Loss converged on {epoch} Epoch.")           
+                break
         
     def transform(self, X, verbose = False):
         
-        X = self._format_input(X)   
+        X = format_input(X, self.missing_values)   
         
 
         nan_mask = np.isnan(X)
@@ -134,11 +123,13 @@ class AEImputer(_BaseImputer):
 
         else:
             raise TypeError(f"Expected init_nan to be in ['noise','mean','median','most_frequent'], got {self.init_nan} instead")
-
+        
         dataset = TensorDataset(torch.tensor(X[incomplete_rows_mask]), torch.tensor(nan_mask[incomplete_rows_mask]))
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
         criterion = nn.MSELoss() 
         
+        early_stopper = EarlyStopper(patience=self.patience, min_delta=self.min_delta)
+
         imputed_batches = []
 
         for data in dataloader:
@@ -155,9 +146,12 @@ class AEImputer(_BaseImputer):
                    
                 reconstruction_loss = criterion(imputed_batch, batch)     
                 
-                if reconstruction_loss < self.tolerance: 
+                if verbose:
+                    print(f"Epoch {epoch+1}, Loss: {reconstruction_loss}")
+
+                if early_stopper.early_stop(reconstruction_loss):  
                     if verbose:
-                        print(f"reconstruction_loss crossed the threshold of {self.tolerance} at the {epoch} epoch.")
+                        print(f"Loss converged on {epoch} Epoch.")           
                     break
                 
             imputed_batches.append(batch)
