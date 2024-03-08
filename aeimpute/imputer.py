@@ -9,35 +9,57 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 
-# TODO: Categorical variables support, early stoping
+# TODO: Categorical variables support, early stoping, fix relative import through __init__.py
 
-class AEImputer():
-    def __init__(self, missing_values = np.nan, n_layers = 3, hidden_dims = None, latent_dim_percentage = 'auto') -> None:
-        self.n_layers = n_layers
-        self.hidden_dims = hidden_dims
-        self.latent_dim_percentage = latent_dim_percentage
+class _BaseImputer:
+    def __init__(self, missing_values):
+        # Initialize the imputer with an empty dictionary of statistics
         self.missing_values = missing_values
 
-    def fit(self, X, max_epochs = 1000, lr = 1e-3, device = 'cpu', batch_size = 32, verbose = False):
+    def fit(self, X):
+        raise NotImplementedError("This is an abstract method")
 
-        if device == 'cuda' and not torch.cuda.is_available():
-           self.device = 'cpu'
-           warnings.warn("device = 'cuda' is specified, but no avaliable cuda devices were found. switching to cpu. (torch.cuda.is_available() is False)")
-        
+    def transform(self, X):
+        raise NotImplementedError("This is an abstract method")
+
+    def fit_transform(self, X, **kwargs):
+        self.fit(X, **kwargs)
+        return self.transform(X,**kwargs)
+    
+    def _format_input(self, X):
         
         if isinstance(X, list):
             X = np.array(X)
         elif isinstance(X, pd.DataFrame):
             X = np.array(X.values)
-        elif not isinstance(X, np.ndarray):
+        if isinstance(X, np.ndarray):
+            X = X.copy()
+        else:
             raise TypeError("Excpeceted X to be np.ndarray, list or pd.DataFrame.")
-        
+            
         if len(X.shape) != 2:
             raise ValueError(f"Excpeceted X to be of shape (batch, features), got {X.shape} instead.")
         
         X = X.astype(np.float32)
         
-        X[X == self.missing_values] = np.nan   
+        X[X == self.missing_values] = np.nan  
+        
+        return X 
+
+class AEImputer(_BaseImputer):
+    def __init__(self, missing_values = np.nan, n_layers = 3, hidden_dims = None, latent_dim_percentage = 'auto') -> None:
+        self.n_layers = n_layers
+        self.hidden_dims = hidden_dims
+        self.latent_dim_percentage = latent_dim_percentage
+        super().__init__(missing_values)
+
+    def fit(self, X, max_epochs = 1000, lr = 1e-3, device = 'cpu', batch_size = 32, verbose = False, **kwargs):
+
+        if device == 'cuda' and not torch.cuda.is_available():
+           self.device = 'cpu'
+           warnings.warn("device = 'cuda' is specified, but no avaliable cuda devices were found. switching to cpu. (torch.cuda.is_available() is False)")
+        
+        X = self._format_input(X)
         
         incomplete_rows_mask = np.isnan(X).any(axis=1)
         
@@ -45,12 +67,8 @@ class AEImputer():
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         
         self.in_features = X.shape[1]
-        
-        
-        
+                        
         # if no hidden_dims is specified, reduce layer dimensionality linearly from in_features to a fraction of in_features defined by latent_dim_percentage
-        
-        
         if self.latent_dim_percentage == 'auto':
             latent_dim = int(self.in_features**0.75)
         elif not isinstance(self.latent_dim_percentage, float):
@@ -82,29 +100,18 @@ class AEImputer():
             self.tolerance = running_loss/len(dataloader)
         return self
         
-    def transform(self, X, batch_size = 32, max_iters = 100, verbose = False):
+    def transform(self, X, batch_size = 32, max_iters = 100, verbose = False, **kwargs):
         
         self.model.eval()
         
-        if isinstance(X, list):
-            X = np.array(X)
-        elif isinstance(X, pd.DataFrame):
-            X = np.array(X.values)
-        elif not isinstance(X, np.ndarray):
-            raise TypeError("Excpeceted X to be np.ndarray, list or pd.DataFrame.")
-        
-        if len(X.shape) != 2:
-            raise ValueError(f"Excpeceted X to be of shape (batch, features), got {X.shape} instead.")
-        
-        X = X.astype(np.float32)
-        
-        X[X == self.missing_values] = np.nan   
+        X = self._format_input(X)   
         
         incomplete_rows_mask = np.isnan(X).any(axis=1)
         
+        #TODO: Get nan mask for all of the X and pass it along with X to the dataset; This will allow for efficient starting imputation (mb start not with random, but with median values)
+        
         dataset = TensorDataset(torch.tensor(X[incomplete_rows_mask]))
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-        
         criterion = nn.MSELoss() 
         
         imputed_batches = []
@@ -141,9 +148,3 @@ class AEImputer():
           
         X[incomplete_rows_mask] = imputed_batches
         return X
-    
-    
-    
-    def fit_transform(self, X, max_epochs = 1e3, max_iters = 1e2, lr = 1e-3, device = 'cpu', batch_size = 32, verbose = False):
-        self.fit(X, max_epochs=max_epochs, lr=lr, device=device, batch_size=batch_size, verbose=verbose)
-        return self.transform(X, max_iters=max_iters, batch_size=batch_size, verbose=verbose)
