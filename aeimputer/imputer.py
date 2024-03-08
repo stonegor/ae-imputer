@@ -9,11 +9,13 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 
-# TODO: Categorical variables support, early stoping, fix relative import through __init__.py
+# TODO: Categorical variables support, early stoping
+# ELBO
+# _BaseImputer, fit and transorm
+# move params to constructor
 
 class _BaseImputer:
     def __init__(self, missing_values):
-        # Initialize the imputer with an empty dictionary of statistics
         self.missing_values = missing_values
 
     def fit(self, X):
@@ -102,7 +104,7 @@ class AEImputer(_BaseImputer):
         
     def transform(self, X, batch_size = 32, max_iters = 100, verbose = False, **kwargs):
         
-        self.model.eval()
+        
         
         X = self._format_input(X)   
         
@@ -110,6 +112,8 @@ class AEImputer(_BaseImputer):
         
         #TODO: Get nan mask for all of the X and pass it along with X to the dataset; This will allow for efficient starting imputation (mb start not with random, but with median values)
         
+        self.model.eval()
+
         dataset = TensorDataset(torch.tensor(X[incomplete_rows_mask]))
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
         criterion = nn.MSELoss() 
@@ -148,3 +152,4 @@ class AEImputer(_BaseImputer):
           
         X[incomplete_rows_mask] = imputed_batches
         return X
+
