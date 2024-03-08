@@ -7,10 +7,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from sklearn.impute import SimpleImputer
 import pandas as pd
 
 # TODO: Categorical variables support, early stoping
 # ELBO
+#TODO: AEImputer.transform - Get nan mask for all of the X and pass it along with X to the dataset; 
+        # This will allow for efficient starting imputation 
+        # (mb start not with random, but with median, KNN or PCA imputed values)
+# Scale input and output
 
 class _BaseImputer:
     def __init__(self, missing_values):
@@ -47,13 +52,14 @@ class _BaseImputer:
 
 
 class AEImputer(_BaseImputer):
-    def __init__(self, missing_values = np.nan, n_layers = 3, hidden_dims = None, latent_dim_percentage = 'auto',max_epochs = 1000, max_impute_iters = 100, lr = 1e-3, device = 'cpu', batch_size = 32):
+    def __init__(self, missing_values = np.nan, n_layers = 3, hidden_dims = None, latent_dim_percentage = 'auto',max_epochs = 1000, lr = 1e-3, max_impute_iters = 100, init_nan = 'mean', device = 'cpu', batch_size = 32):
         self.n_layers = n_layers
         self.hidden_dims = hidden_dims
         self.latent_dim_percentage = latent_dim_percentage
         self.max_epochs = max_epochs
-        self.max_impute_iters = max_impute_iters
         self.lr = lr
+        self.max_impute_iters = max_impute_iters
+        self.init_nan = init_nan
         self.device = device
         self.batch_size = batch_size
         super().__init__(missing_values)
@@ -76,7 +82,9 @@ class AEImputer(_BaseImputer):
         dataset = TensorDataset(torch.tensor(X[~incomplete_rows_mask]))
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
                    
-        # if no hidden_dims is specified, reduce layer dimensionality linearly from in_features to a fraction of in_features defined by latent_dim_percentage
+        # if no hidden_dims is specified, reduce layer dimensionality linearly from in_features 
+        # to a fraction of in_features defined by latent_dim_percentage
+
         if self.latent_dim_percentage == 'auto':
             latent_dim = int(self.in_features**0.75)
         elif not isinstance(self.latent_dim_percentage, float):
@@ -111,39 +119,42 @@ class AEImputer(_BaseImputer):
         
         X = self._format_input(X)   
         
-        incomplete_rows_mask = np.isnan(X).any(axis=1)
-        
-        #TODO: Get nan mask for all of the X and pass it along with X to the dataset; This will allow for efficient starting imputation (mb start not with random, but with median values)
+
+        nan_mask = np.isnan(X)
+        incomplete_rows_mask = nan_mask.any(axis=1)
         
         self.model.eval()
 
-        dataset = TensorDataset(torch.tensor(X[incomplete_rows_mask]))
+        if self.init_nan == 'noise':
+            X[nan_mask] = np.random.randn(*X[nan_mask].shape) 
+            
+        elif self.init_nan in ('mean','median','most_frequent'):
+            simple_imputer = SimpleImputer(strategy=self.init_nan)
+            X = simple_imputer.fit_transform(X)
+
+        else:
+            raise TypeError(f"Expected init_nan to be in ['noise','mean','median','most_frequent'], got {self.init_nan} instead")
+
+        dataset = TensorDataset(torch.tensor(X[incomplete_rows_mask]), torch.tensor(nan_mask[incomplete_rows_mask]))
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
         criterion = nn.MSELoss() 
         
         imputed_batches = []
-                
-        for data in dataloader:
-            batch = data[0]
-            
-            nan_mask = torch.isnan(batch)
-            
-            # Replace missing values in data with random values;
-            batch[nan_mask] = torch.randn(batch[nan_mask].shape) 
-            
 
+        for data in dataloader:
+
+            batch, nan_mask = data
+            
             for epoch in range(self.max_impute_iters):
                 
-                # Input the data to the trained VAE
+
                 _, imputed_batch = self.model(batch) 
                 
                 # Replace the missing values with the reconstructed values, leaving the observed values unchanged;
                 batch[nan_mask] = imputed_batch[nan_mask]  
-              
-                # Compute the reconstruction error of the observed values;       
+                   
                 reconstruction_loss = criterion(imputed_batch, batch)     
                 
-                # If the reconstruction error is below a specified tolerance, end.
                 if reconstruction_loss < self.tolerance: 
                     if verbose:
                         print(f"reconstruction_loss crossed the threshold of {self.tolerance} at the {epoch} epoch.")
