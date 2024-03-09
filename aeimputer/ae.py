@@ -19,7 +19,7 @@ class Encoder(nn.Module):
   def forward(self, x):
     for layer in self.encoder_layers:
       x = layer(x)
-      x = self.activation()(x)
+      x = self.activation(x)
     return x
 
 
