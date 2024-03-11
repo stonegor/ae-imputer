@@ -50,7 +50,8 @@ class AEImputer(_BaseImputer):
 
     hidden_dims : list of int, default=None
         The number of neurons for each hidden layer in the AutoEncoder network. If None, the network
-        will generate a linearly decreasing number of neurons per layer based on `latent_dim_percentage`.
+        will generate a linearly decreasing number of neurons per layer until it reaches
+        number of in features times `latent_dim_percentage`.
 
     latent_dim_percentage : float or 'auto', default='auto'
         The percentage of the input features that will be used to calculate the size of the latent space
@@ -75,7 +76,8 @@ class AEImputer(_BaseImputer):
         The strategy to initialize missing values at model inference steps. 
     
     preimpute_at_train : bool, default = False
-        If True the missing values will be imputed with 'preimpute_strategy' before training.
+        AEImputer uses only complete rows of data during fitting by default.
+        If set True the missing values will be imputed with 'preimpute_strategy' before training.
         Advised, if the fraction of missing rows is significant
 
     device : {'cpu', 'cuda'}, default='cpu'
@@ -107,14 +109,9 @@ class AEImputer(_BaseImputer):
     Examples
     --------
     >>> import numpy as np
-    >>> from sklearn.datasets import make_classification
-    >>> X, _ = make_classification(n_samples=100, n_features=20, n_informative=2, n_redundant=10,
-    ...                            random_state=42, shuffle=False, n_classes=2)
-    >>> # Introduce missing values in 25% of the data
-    >>> rng = np.random.RandomState(42)
-    >>> mask = rng.rand(*X.shape) < 0.25
-    >>> X[mask] = np.nan
-    >>> imputer = AEImputer()
+    >>> from aeimputer import AEImputer
+    >>> X = [[1,2,3],[2,np.nan,4],[np.nan,5,6],[np.nan,2,3],[2,3,4],[4,5,6]]
+    >>> imputer = AEImputer(n_layers = 5)
     >>> X_imputed = imputer.fit_transform(X)
     """
     def __init__(self,model_type = 'variational', missing_values = np.nan, n_layers = 3, hidden_dims = None, latent_dim_percentage = 'auto',max_epochs = 1000, lr = 1e-3, patience = 10, min_delta = 1e-6, max_impute_iters = 15, preimpute_strategy = 'mean',preimpute_at_train = False, device = 'cpu', batch_size = 32):
@@ -231,7 +228,7 @@ class AEImputer(_BaseImputer):
         return X
     def _preimpute(self, X):
         """
-        Impute missing values with basic imputation before inference of training.
+        Impute missing values with basic imputation before inference or training.
         """
         nan_mask = np.isnan(X)
 

@@ -5,9 +5,6 @@ import torch
 def linear_generator(start, end, n_steps: int, return_int = True):
   """
   Generates a linear sequence of numbers from start to end.
-
-  Yields integers if return_int is True, otherwise yields floats.
-  Raises ValueError if n_steps is not positive.
   """
   if n_steps > 0:
     step = (end - start) / (n_steps-1)
