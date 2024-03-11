@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setup(
     name="ae-imputer",
-    version="0.0.1",
+    version="0.0.1.post1",
     description="a python package used for missing data imputation via autoencoders",
     packages=["aeimputer"],
     long_description=long_description,
