@@ -19,15 +19,15 @@ class EarlyStopper:
     def __init__(self, patience=1, min_delta=0):
         self.patience = patience
         self.min_delta = min_delta
-        self._counter = 0
+        self.counter = 0
         self._min_loss = float('inf')
 
     def early_stop(self, loss):
         if loss < self._min_loss:
             self._min_loss = loss
-            self._counter = 0
+            self.counter = 0
         elif loss > (self._min_loss - self.min_delta):
-            self._counter += 1
-            if self._counter >= self.patience:
+            self.counter += 1
+            if self.counter >= self.patience:
                 return True
         return False

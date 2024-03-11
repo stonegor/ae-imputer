@@ -202,6 +202,8 @@ class AEImputer(_BaseImputer):
             batch, nan_mask = data
             batch = batch.to(self.device)
             nan_mask = nan_mask.to(self.device)
+
+            early_stopper.counter = 0
             
             for epoch in range(self.max_impute_iters):
                 
