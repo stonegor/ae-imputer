@@ -16,11 +16,12 @@ class EarlyStopper:
             if early_stopper.early_stop(loss):
                 break
     """
+
     def __init__(self, patience=1, min_delta=0):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
-        self._min_loss = float('inf')
+        self._min_loss = float("inf")
 
     def early_stop(self, loss):
         if loss < self._min_loss:
